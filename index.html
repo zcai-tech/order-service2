@@ -130,6 +130,21 @@
       flex-wrap: wrap;
     }
 
+    .toolbar-side {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .export-feedback {
+      font-size: 14px;
+      color: var(--status-cancelled);
+    }
+
+    .export-feedback.ok { color: var(--status-paid); }
+
     .summary {
       color: var(--muted);
       font-size: 14px;
@@ -286,7 +301,11 @@
     <div class="card">
       <div class="toolbar">
         <div class="summary" id="summary">共 <strong>0</strong> 条订单</div>
-        <div class="summary">当前第 <strong id="currentPageText">1</strong> 页</div>
+        <div class="toolbar-side">
+          <span id="exportFeedback" class="export-feedback" role="status" aria-live="polite"></span>
+          <button type="button" class="btn-secondary" id="exportBtn">导出 CSV</button>
+          <div class="summary">当前第 <strong id="currentPageText">1</strong> 页</div>
+        </div>
       </div>
 
       <div class="table-wrap">
@@ -395,7 +414,9 @@
         currentPageText: document.getElementById("currentPageText"),
         prevBtn: document.getElementById("prevBtn"),
         nextBtn: document.getElementById("nextBtn"),
-        pageNumbers: document.getElementById("pageNumbers")
+        pageNumbers: document.getElementById("pageNumbers"),
+        exportBtn: document.getElementById("exportBtn"),
+        exportFeedback: document.getElementById("exportFeedback")
       };
 
       function getFilters() {
@@ -408,6 +429,7 @@
       }
 
       function applyFilter() {
+        clearExportFeedback();
         var f = getFilters();
         state.filtered = orders.filter(function (o) {
           if (f.orderNo && o.orderNo.toLowerCase().indexOf(f.orderNo) === -1) return false;
@@ -477,12 +499,65 @@
         renderPager();
       }
 
+      var CSV_HEADERS = ["订单号", "客户", "商品", "数量", "金额（元）", "状态", "下单时间"];
+      var CSV_KEYS = ["orderNo", "customer", "product", "quantity", "amount", "status", "createdAt"];
+
+      function csvEscape(value) {
+        var text = value == null ? "" : String(value);
+        if (/[",\r\n]/.test(text)) {
+          return '"' + text.replace(/"/g, '""') + '"';
+        }
+        return text;
+      }
+
+      function buildOrdersCsv(rows) {
+        var lines = [CSV_HEADERS.map(function (header) { return csvEscape(header); }).join(",")];
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          var cells = [];
+          for (var c = 0; c < CSV_KEYS.length; c++) cells.push(csvEscape(row[CSV_KEYS[c]]));
+          lines.push(cells.join(","));
+        }
+        return lines.join("\r\n") + "\r\n";
+      }
+
+      function setExportFeedback(message, ok) {
+        els.exportFeedback.textContent = message;
+        els.exportFeedback.className = ok ? "export-feedback ok" : "export-feedback";
+      }
+
+      function clearExportFeedback() {
+        els.exportFeedback.textContent = "";
+        els.exportFeedback.className = "export-feedback";
+      }
+
+      function exportFilteredOrders() {
+        var rows = state.filtered;
+        if (!rows.length) {
+          setExportFeedback("当前筛选没有匹配订单，未下载 CSV。", false);
+          return;
+        }
+        var csv = buildOrdersCsv(rows);
+        var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "orders.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+        setExportFeedback("已导出 " + rows.length + " 条订单。", true);
+      }
+
       els.searchBtn.addEventListener("click", applyFilter);
+      els.exportBtn.addEventListener("click", exportFilteredOrders);
       els.resetBtn.addEventListener("click", function () {
         els.orderNo.value = "";
         els.customer.value = "";
         els.status.value = "";
         els.product.value = "";
+        clearExportFeedback();
         state.filtered = orders.slice();
         state.page = 1;
         render();
